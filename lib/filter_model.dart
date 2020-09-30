@@ -1,8 +1,9 @@
 
 class FilterModel{
-  String image;
   String name;
-  String filterText;
+  String image;
+  List<double> filterMatrix;
+  bool isSelect;
 
-  FilterModel(this.image, this.name,this.filterText);
+  FilterModel(this.name,this.filterMatrix,this.isSelect);
 }

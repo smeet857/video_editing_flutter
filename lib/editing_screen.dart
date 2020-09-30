@@ -3,11 +3,16 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:video_editing_flutter/change_speed_editing.dart';
 import 'package:video_editing_flutter/constant.dart';
+import 'package:video_editing_flutter/effect_editing.dart';
 import 'package:video_editing_flutter/ffmpeg_edit.dart';
 import 'package:video_editing_flutter/filter_screen.dart';
-import 'package:video_editing_flutter/main.dart';
+import 'package:video_editing_flutter/save_dialog.dart';
+import 'package:video_editing_flutter/util.dart';
 import 'package:video_player/video_player.dart';
 
 import 'tools_model.dart';
@@ -27,16 +32,16 @@ class _EditingScreenState extends State<EditingScreen> {
   bool isFilterAdded = false;
   String progressMessage = "";
   String soundFileName = "";
-  String mainVideoPath;
   String audioPath;
   String directoryPath;
-  String filterDirectoryPath;
-  String soundDirectoryPath;
-  String effectDirectoryPath;
-  String speedDirectoryPath;
-  String filterDisplayPath;
-  String filterInputPath;
-  String soundInputPath;
+  String changeSpeedDir;
+  String exportFramesDir;
+  String mainVideoPath;
+  bool isSpeedChange = false;
+  bool isFilterAdd = false;
+  bool isMusicChanged = false;
+  String saveDir;
+  int videoDuration = 0;
 
   List<ToolsModel> _tools = [
     ToolsModel(IconEffect, 'effect'),
@@ -45,17 +50,57 @@ class _EditingScreenState extends State<EditingScreen> {
     ToolsModel(IconMusic, 'music'),
   ];
 
+  List<double> _activeColorFilter = [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0
+  ];
+  List<double> _defaultFilter = [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0
+  ];
+
   @override
   void initState() {
-    mainVideoPath = widget.file.path;
-    soundInputPath = widget.file.path;
-
+    checkStoragePermission();
     generateDirectory();
-    intializeVideoController(widget.file).then((_) {
-      setState(() {
-        videoPlayerController.play();
-      });
-    });
+    mainVideoPath = widget.file.path;
+    intializeVideoController(widget.file);
     super.initState();
   }
 
@@ -66,71 +111,70 @@ class _EditingScreenState extends State<EditingScreen> {
     super.dispose();
   }
 
+  Future<void> checkStoragePermission() async {
+    await Permission.storage.status.isGranted.then((value) {
+      if (value) {
+        return;
+      }
+      Permission.storage.request();
+    });
+  }
+
   Future<void> intializeVideoController(File file) async {
     videoPlayerController = VideoPlayerController.file(file);
     videoPlayerController.initialize().then((_) {
       videoPlayerController.setLooping(true);
+      videoPlayerController.play();
+      setState(() {});
     });
   }
 
   void extractAllFrames() {}
 
-  void generateDirectory() async {
+  Future<void> generateDirectory() async {
     final Directory appDirectory = await getExternalStorageDirectory();
+
+    saveDir = '/storage/emulated/0/tiktokClone';
+    print('path : ${appDirectory.path}');
     final String path = '${appDirectory.path}/sample_video';
+    changeSpeedDir = '${appDirectory.path}/sample_video/change_speed';
+    exportFramesDir = '${appDirectory.path}/sample_video/export_frames';
     directoryPath = path;
-    filterDirectoryPath = '$path/filter';
-    soundDirectoryPath = '$path/music';
-    effectDirectoryPath = '$path/effect';
-    speedDirectoryPath = '$path/speed';
-    await Directory(path).exists().then((value) {
-      if (value) {
-        return;
-      }
-      Directory(directoryPath).create(recursive: true);
-      Directory(filterDirectoryPath).create(recursive: true);
-      Directory(soundDirectoryPath).create(recursive: true);
-      Directory(effectDirectoryPath).create(recursive: true);
-      Directory(speedDirectoryPath).create(recursive: true);
+
+    Directory(directoryPath).create(recursive: true).then((value) {
+      print('directory path: ${value.path}');
+      Directory(changeSpeedDir).create(recursive: true).then((value) {
+        print('changeSpeedDir: ${value.path}');
+        Directory(saveDir).create(recursive: true).then((value) {
+          print('saveDir: ${value.path}');
+          Directory(exportFramesDir).create(recursive: true).then((value) {
+            print('export frames dir: ${value.path}');
+          });
+        });
+      });
     });
   }
 
   void pickMusicFile() {
+    videoPlayerController.pause();
     FilePicker.getFile(type: FileType.audio).then((file) {
       if (file != null) {
         audioPath = file.path;
-        String outputPath = '$soundDirectoryPath/add sound.mp4';
+        String outputPath = '$directoryPath/add sound.mp4';
         setState(() {
           progressMessage = "Adding Audio...";
           isProgress = true;
         });
-        FFmpegEdit.addAudioToVideo(soundInputPath, audioPath, outputPath)
+        FFmpegEdit.addAudioToVideo(widget.file.path, audioPath, outputPath)
             .then((value) {
-          intializeVideoController(File(outputPath)).then((_) {
-            if (isFilterAdded) {
-              String outputPath2 = '$soundDirectoryPath/add sound2.mp4';
-              FFmpegEdit.addAudioToVideo(mainVideoPath, audioPath, outputPath2)
-                  .then((value) {
-                setState(() {
-                  isProgress = false;
-                  videoPlayerController.play();
-                  mainVideoPath = outputPath2;
-                  widget.file = File(outputPath);
-                  outputPath = "";
-                });
-              });
-            } else {
-              setState(() {
-                isProgress = false;
-                videoPlayerController.play();
-                widget.file = File(outputPath);
-                mainVideoPath = outputPath;
-                outputPath = "";
-              });
-            }
-          });
+          isProgress = false;
+          mainVideoPath = outputPath;
+          isMusicChanged = true;
+          intializeVideoController(File(outputPath));
         });
+        return;
       }
+      videoPlayerController.play();
     });
   }
 
@@ -161,83 +205,168 @@ class _EditingScreenState extends State<EditingScreen> {
               actions: [
                 FlatButton(
                     onPressed: () {
-                      Navigator.pop(context);
+                      Navigator.pop(context, '');
                     },
                     child: Text('Cancel')),
                 FlatButton(
                     onPressed: () {
                       File(directoryPath).delete(recursive: true);
                       Navigator.pop(context);
-                      Navigator.pop(context);
+                      Navigator.pop(context, '');
                     },
                     child: Text('Yes')),
               ],
             ));
       },
       child: Scaffold(
-          body: Stack(
-        children: [
-          Column(
-            children: [
-              Expanded(
-                child: AspectRatio(
-                  aspectRatio: videoPlayerController.value.aspectRatio,
-                  child: VideoPlayer(videoPlayerController),
+          body: Builder(
+        builder: (context) => Stack(
+          children: [
+            Column(
+              children: [
+                Expanded(
+                  flex: 1,
+                  child: ColorFiltered(
+                      colorFilter: ColorFilter.matrix(_activeColorFilter),
+                      child: VideoPlayer(videoPlayerController)),
                 ),
-              ),
-              Container(
-                alignment: Alignment.center,
-                width: double.infinity,
-                height: 100,
-                child: ListView.builder(
-                  itemBuilder: (context, index) {
-                    return GestureDetector(
-                        onTap: () {
-                          switch (_tools[index].name) {
-                            case 'effect':
-                              break;
-                            case 'filter':
-                              filterDisplayPath = widget.file.path;
-                              filterInputPath = mainVideoPath;
-                              Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (context) => FilterScreen(
-                                          filterDisplayPath,
-                                          filterInputPath,
-                                          filterDirectoryPath))).then((value) {
-                                String path = value;
-                                isFilterAdded =
-                                    path.contains('filter') ? true : false;
-                                widget.file = File(path);
-                                soundInputPath = path;
-                                intializeVideoController(File(path))
-                                    .then((value) {
+                Container(
+                  alignment: Alignment.center,
+                  width: double.infinity,
+                  height: 100,
+                  child: ListView.builder(
+                    itemBuilder: (context, index) {
+                      return GestureDetector(
+                          onTap: () {
+                            switch (_tools[index].name) {
+                              case 'effect':
+                                videoPlayerController.pause();
+                                Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (context) => EffectEditing(
+                                            mainVideoPath,
+                                            exportFramesDir,
+                                            _activeColorFilter))).then((value){
+                                              videoPlayerController.play();
+                                });
+                                break;
+                              case 'filter':
+                                videoPlayerController.pause();
+                                Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (context) => FilterScreen(
+                                            File(mainVideoPath),
+                                            _activeColorFilter))).then((value) {
                                   setState(() {
+                                    List<double> _filter = value;
+                                    if (_filter == _defaultFilter) {
+                                      isFilterAdd = false;
+                                    } else {
+                                      isFilterAdd = true;
+                                      _activeColorFilter = value;
+                                    }
                                     videoPlayerController.play();
                                   });
                                 });
-                              });
-                              break;
-                            case 'music':
-                              pickMusicFile();
-                              break;
-                            case 'speed':
-                              break;
+                                break;
+                              case 'music':
+                                pickMusicFile();
+                                break;
+                              case 'speed':
+                                videoPlayerController.pause();
+                                Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (context) =>
+                                                ChangeSpeedEditing(
+                                                    mainVideoPath,
+                                                    changeSpeedDir,
+                                                    _activeColorFilter)))
+                                    .then((value) {
+                                  String path = value;
+                                  File file = File(path);
+                                  if (path != '') {
+                                    isSpeedChange = true;
+                                    mainVideoPath = path;
+                                    widget.file = file;
+                                    intializeVideoController(File(path));
+                                  } else {
+                                    videoPlayerController.play();
+                                  }
+                                });
+                                break;
+                            }
+                          },
+                          child: ToolsView(_tools[index]));
+                    },
+                    itemCount: 4,
+                    scrollDirection: Axis.horizontal,
+                  ),
+                ),
+              ],
+            ),
+            Visibility(
+                visible: isProgress,
+                child: showProgressDialogWithMessage(progressMessage)),
+            Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 40, horizontal: 10),
+                child: FlatButton(
+                  onPressed: () {
+                    if (isFilterAdd || isMusicChanged || isSpeedChange) {
+                      showDialog(
+                          context: context,
+                          builder: (context) {
+                            return SaveDialog();
+                          }).then((value) {
+                        String filename = value;
+                        if (filename.isNotEmpty) {
+                          setState(() {
+                            progressMessage = 'Exporitng';
+                            isProgress = true;
+                            videoPlayerController.pause();
+                          });
+                          if (isFilterAdd) {
+                            String outputPath = '$saveDir/$filename';
+                            String filterText = Util.getColorChannelMixerFilter(
+                                _activeColorFilter);
+                            FFmpegEdit.colorChannelMixer(
+                                    mainVideoPath, outputPath, filterText)
+                                .then((_) {
+                              Navigator.pop(context, outputPath);
+                            });
                           }
-                        },
-                        child: ToolsView(_tools[index]));
+                          File file = File(mainVideoPath);
+                          String path = '$saveDir/$filename';
+                          file.copy(path).then((value) {
+                            setState(() {
+                              progressMessage = '';
+                              isProgress = false;
+                            });
+                            Navigator.pop(context, path);
+                          });
+                        }
+                      });
+                    } else {
+                      Util.showSnackBar(context, 'No Changes');
+                    }
                   },
-                  itemCount: 4,
-                  scrollDirection: Axis.horizontal,
+                  color: Colors.red,
+                  child: Text(
+                    'Complete',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
                 ),
               ),
-            ],
-          ),
-          Visibility(
-              visible: isProgress,
-              child: showProgressDialogWithMessage(progressMessage)),
-        ],
+            )
+          ],
+        ),
       )),
     );
   }
